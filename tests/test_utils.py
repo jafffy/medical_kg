@@ -134,11 +134,11 @@ class TestOpenRouterClient:
     def test_extract_entities_input_validation(self, client):
         """Test entity extraction input validation"""
         # Empty text
-        result = client.extract_entities("")
+        result = client.extract_medical_entities("")
         assert result == []
         
         # None text
-        result = client.extract_entities(None)
+        result = client.extract_medical_entities(None)
         assert result == []
     
     @patch.object(OpenRouterClient, '_make_request')

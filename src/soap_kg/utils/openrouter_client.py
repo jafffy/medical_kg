@@ -1,10 +1,14 @@
 import requests
 import json
 import time
+import urllib3
+import sys
 from typing import Dict, List, Optional, Any
 from soap_kg.config import Config
 import logging
 import re
+import hashlib
+import html
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +83,79 @@ class OpenRouterClient:
         text = re.sub(r'\b[A-Za-z0-9\-_.]{50,}\b', '[MASKED_LONG_TOKEN]', text)
         
         return text
+    
+    def _sanitize_input_text(self, text: str) -> str:
+        """Sanitize input text to prevent injection attacks"""
+        if not text or not Config.SANITIZE_INPUT_TEXT:
+            return text
+            
+        # Remove or escape potentially dangerous characters
+        sanitized = text.strip()
+        
+        # HTML escape to prevent HTML injection
+        sanitized = html.escape(sanitized, quote=True)
+        
+        # Remove null bytes and other control characters
+        sanitized = ''.join(char for char in sanitized if ord(char) >= 32 or char in '\n\r\t')
+        
+        # Limit length to prevent oversized payloads
+        if len(sanitized) > Config.MAX_PROMPT_LENGTH:
+            logger.warning(f"Input text truncated from {len(sanitized)} to {Config.MAX_PROMPT_LENGTH} characters")
+            sanitized = sanitized[:Config.MAX_PROMPT_LENGTH]
+            
+        return sanitized
+    
+    def _validate_request_size(self, payload: Dict) -> bool:
+        """Validate request payload size"""
+        try:
+            payload_json = json.dumps(payload)
+            payload_size = len(payload_json.encode('utf-8'))
+            
+            if payload_size > Config.MAX_REQUEST_SIZE_BYTES:
+                logger.error(f"Request payload too large: {payload_size} bytes (max: {Config.MAX_REQUEST_SIZE_BYTES})")
+                return False
+                
+            logger.debug(f"Request payload size: {payload_size} bytes")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error validating request size: {e}")
+            return False
+    
+    def _detect_suspicious_patterns(self, text: str) -> bool:
+        """Detect suspicious patterns that might indicate injection attacks"""
+        if not text or not Config.BLOCK_SUSPICIOUS_PATTERNS:
+            return False
+            
+        suspicious_patterns = [
+            r'<script[^>]*>.*?</script>',  # Script injection
+            r'javascript:',  # JavaScript protocol
+            r'data:text/html',  # Data URL HTML
+            r'\\x[0-9a-fA-F]{2}',  # Hex encoding
+            r'%[0-9a-fA-F]{2}',  # URL encoding of control chars
+            r'\\u[0-9a-fA-F]{4}',  # Unicode escape sequences
+            r'eval\s*\(',  # eval function
+            r'exec\s*\(',  # exec function
+            r'__import__\s*\(',  # Python import
+            r'system\s*\(',  # System calls
+        ]
+        
+        for pattern in suspicious_patterns:
+            if re.search(pattern, text, re.IGNORECASE):
+                logger.warning(f"Suspicious pattern detected in input: {pattern}")
+                if Config.LOG_SECURITY_EVENTS:
+                    # Create a hash of the suspicious text for logging without exposing content
+                    text_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
+                    logger.warning(f"SECURITY_EVENT: Suspicious pattern blocked (hash: {text_hash})")
+                return True
+                
+        return False
+    
+    def _log_security_event(self, event_type: str, details: str):
+        """Log security events for monitoring"""
+        if Config.LOG_SECURITY_EVENTS:
+            timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+            logger.warning(f"SECURITY_EVENT [{timestamp}] {event_type}: {details}")
         
     def _make_request(self, messages: List[Dict], max_tokens: int = 1000, 
                      temperature: float = 0.1, max_retries: int = 2) -> Optional[str]:
@@ -96,12 +173,38 @@ class OpenRouterClient:
         
         for attempt in range(max_retries + 1):
             try:
+                # Validate payload size before sending
+                if not self._validate_request_size(payload):
+                    logger.error("Request payload exceeds size limits")
+                    self._log_security_event("OVERSIZED_REQUEST", f"Payload size exceeds {Config.MAX_REQUEST_SIZE_BYTES} bytes")
+                    return None
+                
+                # Configure SSL settings
+                verify_ssl = Config.VERIFY_SSL_CERTIFICATES
+                if not verify_ssl:
+                    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+                    logger.warning("SSL certificate verification is disabled")
+                
+                # Log request if enabled
+                if Config.ENABLE_REQUEST_LOGGING:
+                    safe_payload = {**payload}
+                    safe_payload['messages'] = '[MASKED]'  # Don't log actual content
+                    logger.debug(f"Making API request: {safe_payload}")
+                
                 response = requests.post(
                     f"{self.base_url}/chat/completions",
                     headers=self.headers,
                     json=payload,
-                    timeout=60  # Increased timeout
+                    timeout=Config.REQUEST_TIMEOUT,
+                    verify=verify_ssl
                 )
+                
+                # Validate response size
+                response_size = len(response.content)
+                if response_size > Config.MAX_RESPONSE_SIZE_BYTES:
+                    logger.error(f"Response too large: {response_size} bytes (max: {Config.MAX_RESPONSE_SIZE_BYTES})")
+                    self._log_security_event("OVERSIZED_RESPONSE", f"Response size {response_size} exceeds limit")
+                    return None
                 
                 if response.status_code == 200:
                     result = response.json()
@@ -323,6 +426,18 @@ class OpenRouterClient:
         if not self.api_key:
             logger.info("No OpenRouter API key provided, skipping LLM entity extraction")
             return []
+        
+        # Sanitize and validate input
+        if not text or not text.strip():
+            return []
+            
+        # Check for suspicious patterns
+        if self._detect_suspicious_patterns(text):
+            logger.warning("Suspicious patterns detected in input text, blocking request")
+            return []
+            
+        # Sanitize input text
+        sanitized_text = self._sanitize_input_text(text)
             
         prompt = f"""
         Extract medical entities from the following clinical text. 
@@ -334,7 +449,7 @@ class OpenRouterClient:
         
         Valid types: DISEASE, SYMPTOM, MEDICATION, PROCEDURE, ANATOMY, LAB_VALUE, VITAL_SIGN, TREATMENT
         
-        Clinical text: {text}
+        Clinical text: {sanitized_text}
         
         IMPORTANT: 
         - Return ONLY the JSON array, no explanation or markdown
@@ -370,13 +485,30 @@ class OpenRouterClient:
         if not self.api_key:
             logger.info("No OpenRouter API key provided, skipping LLM SOAP categorization")
             return {"subjective": [], "objective": [], "assessment": [], "plan": []}
+        
+        # Validate inputs
+        if not text or not text.strip():
+            return {"subjective": [], "objective": [], "assessment": [], "plan": []}
+            
+        # Check for suspicious patterns
+        if self._detect_suspicious_patterns(text):
+            logger.warning("Suspicious patterns detected in input text, blocking request")
+            return {"subjective": [], "objective": [], "assessment": [], "plan": []}
+            
+        # Sanitize input text
+        sanitized_text = self._sanitize_input_text(text)
+        
+        # Validate entities input
+        if not isinstance(entities, list):
+            logger.warning("Invalid entities input type, expected list")
+            entities = []
             
         entities_text = json.dumps(entities, indent=2)
         
         prompt = f"""
         Categorize the following medical entities into SOAP categories based on the clinical text context.
         
-        Clinical text: {text}
+        Clinical text: {sanitized_text}
         
         Entities: {entities_text}
         
@@ -461,13 +593,30 @@ class OpenRouterClient:
         if not self.api_key:
             logger.info("No OpenRouter API key provided, skipping LLM relationship extraction")
             return []
+        
+        # Validate inputs
+        if not text or not text.strip():
+            return []
+            
+        # Check for suspicious patterns
+        if self._detect_suspicious_patterns(text):
+            logger.warning("Suspicious patterns detected in input text, blocking request")
+            return []
+            
+        # Sanitize input text
+        sanitized_text = self._sanitize_input_text(text)
+        
+        # Validate entities input
+        if not isinstance(entities, list):
+            logger.warning("Invalid entities input type, expected list")
+            entities = []
             
         entities_text = json.dumps(entities, indent=2)
         
         prompt = f"""
         Extract relationships between medical entities from the clinical text.
         
-        Clinical text: {text}
+        Clinical text: {sanitized_text}
         
         Entities: {entities_text}
         

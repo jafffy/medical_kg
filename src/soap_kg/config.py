@@ -62,3 +62,16 @@ class Config:
     MASK_SENSITIVE_DATA_IN_LOGS = True
     MIN_API_KEY_LENGTH = 20
     ALLOW_TEST_API_KEYS = False  # Set to True in development environments
+    
+    # SSL and Request Security
+    VERIFY_SSL_CERTIFICATES = True
+    MAX_REQUEST_SIZE_BYTES = 1048576  # 1MB
+    MAX_RESPONSE_SIZE_BYTES = 2097152  # 2MB
+    SANITIZE_INPUT_TEXT = True
+    BLOCK_SUSPICIOUS_PATTERNS = True
+    
+    # Content Security
+    ALLOWED_CONTENT_TYPES = ["application/json"]
+    MAX_PROMPT_LENGTH = 50000
+    ENABLE_REQUEST_LOGGING = True
+    LOG_SECURITY_EVENTS = True
