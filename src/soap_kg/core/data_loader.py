@@ -131,13 +131,19 @@ class MimicDataLoader:
         diag_df = self.load_csv('d_icd_diagnoses')
         if not diag_df.empty:
             for _, row in diag_df.iterrows():
-                icd_descriptions[row['icd_code']] = row['long_title']
+                icd_code = row.get('icd_code')
+                long_title = row.get('long_title')
+                if icd_code and long_title:
+                    icd_descriptions[icd_code] = long_title
         
         # Load ICD procedures descriptions
         proc_df = self.load_csv('d_icd_procedures')
         if not proc_df.empty:
             for _, row in proc_df.iterrows():
-                icd_descriptions[row['icd_code']] = row['long_title']
+                icd_code = row.get('icd_code')
+                long_title = row.get('long_title')
+                if icd_code and long_title:
+                    icd_descriptions[icd_code] = long_title
         
         return icd_descriptions
     
