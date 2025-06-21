@@ -85,19 +85,48 @@ class SOAPCategorizer:
             
             soap_result = self.client.categorize_soap(text, entity_dicts)
             
+            # Debug logging
+            logger.debug(f"LLM SOAP result type: {type(soap_result)}")
+            logger.debug(f"LLM SOAP result: {soap_result}")
+            
+            # Ensure soap_result is a dictionary
+            if not isinstance(soap_result, dict):
+                logger.warning(f"Expected dict from LLM SOAP categorization, got {type(soap_result)}")
+                return {}
+            
             # Convert result to entity ID -> SOAPCategory mapping
             entity_categories = {}
             
             for category_name, entity_list in soap_result.items():
                 try:
                     soap_category = SOAPCategory(category_name.lower())
-                    for entity_dict in entity_list:
+                    
+                    # Ensure entity_list is actually a list
+                    if not isinstance(entity_list, list):
+                        logger.warning(f"Expected list for category {category_name}, got {type(entity_list)}")
+                        continue
+                    
+                    for entity_item in entity_list:
+                        # Handle both dict and string formats
+                        entity_text = ""
+                        if isinstance(entity_item, dict):
+                            entity_text = entity_item.get('text', '')
+                        elif isinstance(entity_item, str):
+                            entity_text = entity_item
+                        else:
+                            logger.warning(f"Unexpected entity format: {type(entity_item)} - {entity_item}")
+                            continue
+                        
                         # Find matching entity by text
                         for entity in entities:
-                            if entity.text.lower() == entity_dict.get('text', '').lower():
+                            if entity.text.lower() == entity_text.lower():
                                 entity_categories[entity.id] = soap_category
                                 break
-                except ValueError:
+                except ValueError as e:
+                    logger.warning(f"Invalid SOAP category: {category_name} - {e}")
+                    continue
+                except Exception as e:
+                    logger.warning(f"Error processing category {category_name}: {e}")
                     continue
             
             return entity_categories

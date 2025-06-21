@@ -345,14 +345,38 @@ class OpenRouterClient:
                     logger.debug(f"Raw response: {response[:300]}...")
                     return {"subjective": [], "objective": [], "assessment": [], "plan": []}
                 
-                # Ensure all expected keys exist
+                # Ensure all expected keys exist and validate structure
                 default_categories = {"subjective": [], "objective": [], "assessment": [], "plan": []}
                 if isinstance(soap_categories, dict):
+                    # Ensure all required keys are present
                     for key in default_categories:
                         if key not in soap_categories:
                             soap_categories[key] = []
+                        # Ensure each value is a list
+                        elif not isinstance(soap_categories[key], list):
+                            logger.warning(f"SOAP category '{key}' is not a list, converting: {type(soap_categories[key])}")
+                            if isinstance(soap_categories[key], str):
+                                # If it's a string, try to treat it as a single entity
+                                soap_categories[key] = [soap_categories[key]] if soap_categories[key].strip() else []
+                            else:
+                                soap_categories[key] = []
+                    
+                    # Validate each list contains proper items
+                    for key, items in soap_categories.items():
+                        if isinstance(items, list):
+                            validated_items = []
+                            for item in items:
+                                if isinstance(item, dict):
+                                    validated_items.append(item)
+                                elif isinstance(item, str) and item.strip():
+                                    # Convert string to simple dict format
+                                    validated_items.append({"text": item.strip()})
+                                # Skip invalid items
+                            soap_categories[key] = validated_items
+                    
                     return soap_categories
                 else:
+                    logger.warning(f"SOAP categorization returned non-dict: {type(soap_categories)}")
                     return default_categories
             except Exception as e:
                 logger.error(f"Unexpected error parsing SOAP categorization response: {e}")
