@@ -1,7 +1,7 @@
 from typing import List, Dict, Optional
 import logging
-from openrouter_client import OpenRouterClient
-from soap_schema import MedicalEntity, SOAPCategory, EntityType
+from soap_kg.utils.openrouter_client import OpenRouterClient
+from soap_kg.models.soap_schema import MedicalEntity, SOAPCategory, EntityType
 import re
 
 logger = logging.getLogger(__name__)

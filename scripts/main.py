@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Rule-Based SOAP Knowledge Graph Generator
+SOAP Knowledge Graph Generator for MIMIC-IV Dataset
 
-This version uses only rule-based processing without any LLM dependencies.
-Perfect for reliable, fast processing without API costs or parsing issues.
+This script processes MIMIC-IV clinical data to construct a knowledge graph
+organized by SOAP (Subjective, Objective, Assessment, Plan) categories.
 """
 
 import argparse
@@ -14,14 +14,17 @@ from datetime import datetime
 from typing import Optional
 
 # Import our modules
-from config import Config
-from data_loader import MimicDataLoader
-from medical_ner import MedicalNER
-from relationship_extractor import RelationshipExtractor
-from soap_categorizer import SOAPCategorizer
-from knowledge_graph_builder import KnowledgeGraphBuilder
-from visualization import KnowledgeGraphVisualizer
-from soap_schema import SOAPNote, SOAPCategory
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
+from soap_kg.config import Config
+from soap_kg.core.data_loader import MimicDataLoader
+from soap_kg.utils.openrouter_client import OpenRouterClient
+from soap_kg.core.medical_ner import MedicalNER
+from soap_kg.core.relationship_extractor import RelationshipExtractor
+from soap_kg.core.soap_categorizer import SOAPCategorizer
+from soap_kg.core.knowledge_graph_builder import KnowledgeGraphBuilder
+from soap_kg.utils.visualization import KnowledgeGraphVisualizer
+from soap_kg.models.soap_schema import SOAPNote, SOAPCategory
 
 def setup_logging(log_level: str = "INFO", log_file: Optional[str] = None):
     """Setup logging configuration"""
@@ -37,24 +40,39 @@ def setup_logging(log_level: str = "INFO", log_file: Optional[str] = None):
         handlers=handlers
     )
 
-def process_rule_based_data(n_patients: int = 100) -> KnowledgeGraphBuilder:
-    """Process data using only rule-based methods"""
+def validate_environment():
+    """Validate required environment variables and files"""
+    errors = []
+    
+    # Check OpenRouter API key
+    if not Config.OPENROUTER_API_KEY:
+        errors.append("OPENROUTER_API_KEY not found in environment variables")
+    
+    # Check MIMIC-IV data path
+    if not os.path.exists(Config.MIMIC_IV_PATH):
+        errors.append(f"MIMIC-IV data path not found: {Config.MIMIC_IV_PATH}")
+    
+    if errors:
+        for error in errors:
+            logging.error(error)
+        sys.exit(1)
+
+def process_sample_data(n_patients: int = 10, use_llm: bool = True) -> KnowledgeGraphBuilder:
+    """Process sample data and build knowledge graph"""
     logger = logging.getLogger(__name__)
     
-    # Initialize components (no OpenRouter client)
-    logger.info("Initializing rule-based components...")
+    # Initialize components
+    logger.info("Initializing components...")
     data_loader = MimicDataLoader()
-    ner = MedicalNER(openrouter_client=None)  # No LLM client
-    rel_extractor = RelationshipExtractor(openrouter_client=None)  # No LLM client
-    soap_categorizer = SOAPCategorizer(openrouter_client=None)  # No LLM client
+    openrouter_client = OpenRouterClient() if use_llm else None
+    ner = MedicalNER(openrouter_client)
+    rel_extractor = RelationshipExtractor(openrouter_client)
+    soap_categorizer = SOAPCategorizer(openrouter_client)
     kg_builder = KnowledgeGraphBuilder()
     
     # Load sample patient data
     logger.info(f"Loading sample data for {n_patients} patients...")
     sample_records = data_loader.get_sample_records(n_patients)
-    
-    processed_count = 0
-    successful_count = 0
     
     # Process each patient
     for i, patient_data in enumerate(sample_records):
@@ -80,28 +98,26 @@ def process_rule_based_data(n_patients: int = 100) -> KnowledgeGraphBuilder:
             
             if not combined_text.strip():
                 logger.warning(f"No clinical text found for patient {patient_id}")
-                processed_count += 1
                 continue
             
-            # Extract entities using ONLY rule-based methods
-            logger.debug(f"Extracting entities for patient {patient_id}")
-            entities = ner.extract_entities(combined_text, use_llm=False)
+            # Extract entities
+            logger.info(f"Extracting entities for patient {patient_id}")
+            entities = ner.extract_entities(combined_text, use_llm=use_llm)
             
             if not entities:
                 logger.warning(f"No entities extracted for patient {patient_id}")
-                processed_count += 1
                 continue
             
-            # Categorize entities into SOAP categories using ONLY rule-based methods
-            logger.debug(f"Categorizing entities into SOAP categories for patient {patient_id}")
+            # Categorize entities into SOAP categories
+            logger.info(f"Categorizing entities into SOAP categories for patient {patient_id}")
             categorized_entities = soap_categorizer.categorize_entities(
-                combined_text, entities, use_llm=False
+                combined_text, entities, use_llm=use_llm
             )
             
-            # Extract relationships using ONLY rule-based methods
-            logger.debug(f"Extracting relationships for patient {patient_id}")
+            # Extract relationships
+            logger.info(f"Extracting relationships for patient {patient_id}")
             relationships = rel_extractor.extract_relationships(
-                combined_text, categorized_entities, use_llm=False
+                combined_text, categorized_entities, use_llm=use_llm
             )
             
             # Create SOAP note
@@ -117,30 +133,20 @@ def process_rule_based_data(n_patients: int = 100) -> KnowledgeGraphBuilder:
                 metadata={
                     'processed_at': datetime.now().isoformat(),
                     'source_texts_count': len(clinical_texts),
-                    'processing_method': 'rule_based_only'
+                    'use_llm': use_llm
                 }
             )
             
             # Add to knowledge graph
             kg_builder.add_soap_note(soap_note)
-            successful_count += 1
             
             logger.info(f"Successfully processed patient {patient_id}: "
                        f"{len(categorized_entities)} entities, {len(relationships)} relationships")
             
         except Exception as e:
             logger.error(f"Error processing patient {patient_id}: {e}")
-        
-        processed_count += 1
-        
-        # Progress update every 25 patients
-        if processed_count % 25 == 0:
-            current_stats = kg_builder.get_graph_statistics()
-            logger.info(f"Progress: {processed_count}/{len(sample_records)} patients, "
-                       f"{successful_count} successful, "
-                       f"{current_stats.get('total_entities', 0)} total entities")
+            continue
     
-    logger.info(f"Processing completed: {successful_count}/{processed_count} patients successful")
     return kg_builder
 
 def generate_reports(kg_builder: KnowledgeGraphBuilder, output_dir: str):
@@ -154,8 +160,8 @@ def generate_reports(kg_builder: KnowledgeGraphBuilder, output_dir: str):
     stats = kg_builder.get_graph_statistics()
     
     with open(os.path.join(output_dir, "statistics.txt"), 'w') as f:
-        f.write("SOAP Knowledge Graph Statistics (Rule-Based)\n")
-        f.write("=" * 50 + "\n\n")
+        f.write("SOAP Knowledge Graph Statistics\n")
+        f.write("=" * 40 + "\n\n")
         
         for key, value in stats.items():
             if isinstance(value, dict):
@@ -196,6 +202,11 @@ def generate_reports(kg_builder: KnowledgeGraphBuilder, output_dir: str):
             save_path=os.path.join(output_dir, "dashboard.html")
         )
         
+        # Interactive network
+        visualizer.create_interactive_network(
+            save_path=os.path.join(output_dir, "interactive_network.html")
+        )
+        
         logger.info(f"Visualizations saved to {output_dir}")
         
     except Exception as e:
@@ -214,17 +225,17 @@ def generate_reports(kg_builder: KnowledgeGraphBuilder, output_dir: str):
 def main():
     """Main function"""
     parser = argparse.ArgumentParser(
-        description="Rule-Based SOAP Knowledge Graph Generator for MIMIC-IV dataset"
+        description="Generate SOAP Knowledge Graph from MIMIC-IV dataset"
     )
     
     parser.add_argument(
-        "--patients", "-p", type=int, default=100,
-        help="Number of patients to process (default: 100)"
+        "--patients", "-p", type=int, default=10,
+        help="Number of patients to process (default: 10)"
     )
     
     parser.add_argument(
-        "--output-dir", "-o", type=str, default="./output_rules",
-        help="Output directory for results (default: ./output_rules)"
+        "--output-dir", "-o", type=str, default="./output",
+        help="Output directory for results (default: ./output)"
     )
     
     parser.add_argument(
@@ -239,8 +250,18 @@ def main():
     )
     
     parser.add_argument(
+        "--no-llm", action="store_true",
+        help="Disable LLM-based processing (use rule-based only)"
+    )
+    
+    parser.add_argument(
         "--data-path", type=str, default=None,
         help="Path to MIMIC-IV dataset (default: from config)"
+    )
+    
+    parser.add_argument(
+        "--load-existing", type=str, default=None,
+        help="Load existing knowledge graph from pickle file"
     )
     
     args = parser.parse_args()
@@ -249,16 +270,29 @@ def main():
     setup_logging(args.log_level, args.log_file)
     logger = logging.getLogger(__name__)
     
-    logger.info("Starting Rule-Based SOAP Knowledge Graph generation...")
+    logger.info("Starting SOAP Knowledge Graph generation...")
     logger.info(f"Arguments: {vars(args)}")
     
     # Update config if data path provided
     if args.data_path:
         Config.MIMIC_IV_PATH = args.data_path
     
+    # Validate environment
+    if not args.no_llm:
+        validate_environment()
+    
     try:
-        # Process data and build knowledge graph
-        kg_builder = process_rule_based_data(n_patients=args.patients)
+        if args.load_existing:
+            # Load existing knowledge graph
+            logger.info(f"Loading existing knowledge graph from {args.load_existing}")
+            kg_builder = KnowledgeGraphBuilder()
+            kg_builder.load_from_file(args.load_existing)
+        else:
+            # Process data and build knowledge graph
+            kg_builder = process_sample_data(
+                n_patients=args.patients,
+                use_llm=not args.no_llm
+            )
         
         # Generate reports and visualizations
         generate_reports(kg_builder, args.output_dir)
@@ -270,12 +304,6 @@ def main():
         logger.info(f"Total relationships: {stats.get('total_relations', 0)}")
         logger.info(f"Total patients: {stats.get('total_patients', 0)}")
         logger.info(f"Results saved to: {args.output_dir}")
-        
-        # Print entity breakdown
-        soap_dist = stats.get('soap_distribution', {})
-        logger.info("SOAP Distribution:")
-        for category, count in soap_dist.items():
-            logger.info(f"  {category}: {count} entities")
         
     except KeyboardInterrupt:
         logger.info("Processing interrupted by user")

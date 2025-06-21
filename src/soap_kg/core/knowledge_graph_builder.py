@@ -1,7 +1,7 @@
 import networkx as nx
 from typing import Dict, List, Optional, Tuple, Set
 import logging
-from soap_schema import (
+from soap_kg.models.soap_schema import (
     SOAPKnowledgeGraph, MedicalEntity, MedicalRelation, 
     SOAPNote, EntityType, RelationType, SOAPCategory
 )

@@ -1,7 +1,7 @@
 from typing import List, Dict, Optional, Tuple
 import logging
-from openrouter_client import OpenRouterClient
-from soap_schema import MedicalEntity, MedicalRelation, RelationType, SOAPCategory
+from soap_kg.utils.openrouter_client import OpenRouterClient
+from soap_kg.models.soap_schema import MedicalEntity, MedicalRelation, RelationType, SOAPCategory
 import uuid
 import re
 

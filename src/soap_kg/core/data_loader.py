@@ -2,7 +2,7 @@ import pandas as pd
 import gzip
 import os
 from typing import Dict, List, Optional, Tuple
-from config import Config
+from soap_kg.config import Config
 import logging
 
 logging.basicConfig(level=logging.INFO)

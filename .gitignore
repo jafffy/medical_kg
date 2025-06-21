@@ -72,15 +72,23 @@ test_*/
 *.temp
 *~
 
-# Project specific
-config.py
-processing_config.py
-requirements.txt
-environment.yml
+# Project specific - data and outputs
+mimic-iv-3.1/
+data/
+output*/
+test_*/
 *.html
 *.png
 *.jpg
 *.jpeg
 *.pdf
-*.md
+
+# Keep important project files
 !README.md
+!requirements.txt
+!environment.yml
+
+# Build artifacts
+build/
+dist/
+*.egg-info/

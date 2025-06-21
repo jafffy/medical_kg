@@ -2,7 +2,7 @@ import requests
 import json
 import time
 from typing import Dict, List, Optional, Any
-from config import Config
+from soap_kg.config import Config
 import logging
 
 logger = logging.getLogger(__name__)

@@ -7,8 +7,8 @@ from plotly.subplots import make_subplots
 import pandas as pd
 from typing import Dict, List, Optional, Tuple
 import logging
-from knowledge_graph_builder import KnowledgeGraphBuilder
-from soap_schema import SOAPCategory, EntityType, RelationType
+from soap_kg.core.knowledge_graph_builder import KnowledgeGraphBuilder
+from soap_kg.models.soap_schema import SOAPCategory, EntityType, RelationType
 import numpy as np
 
 logger = logging.getLogger(__name__)

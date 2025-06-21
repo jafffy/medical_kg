@@ -1,8 +1,8 @@
 from typing import List, Dict, Optional, Tuple
 import logging
-from openrouter_client import OpenRouterClient
-from text_preprocessor import MedicalTextPreprocessor
-from soap_schema import MedicalEntity, EntityType, SOAPCategory
+from soap_kg.utils.openrouter_client import OpenRouterClient
+from soap_kg.utils.text_preprocessor import MedicalTextPreprocessor
+from soap_kg.models.soap_schema import MedicalEntity, EntityType, SOAPCategory
 import uuid
 
 logger = logging.getLogger(__name__)
