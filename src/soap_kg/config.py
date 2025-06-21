@@ -56,3 +56,9 @@ class Config:
     MIN_ENTITIES_PER_PATIENT = 1
     MIN_CONFIDENCE_THRESHOLD = 0.3
     ENABLE_ENTITY_VALIDATION = True
+    
+    # Security Configuration
+    ENABLE_API_KEY_VALIDATION = True
+    MASK_SENSITIVE_DATA_IN_LOGS = True
+    MIN_API_KEY_LENGTH = 20
+    ALLOW_TEST_API_KEYS = False  # Set to True in development environments

@@ -4,6 +4,7 @@ import time
 from typing import Dict, List, Optional, Any
 from soap_kg.config import Config
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -12,12 +13,72 @@ class OpenRouterClient:
         self.api_key = api_key or Config.OPENROUTER_API_KEY
         self.base_url = Config.OPENROUTER_BASE_URL
         self.model = model or Config.DEFAULT_MODEL
+        
+        # Validate API key security
+        if self.api_key:
+            self._validate_api_key()
+        
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
             "HTTP-Referer": "https://github.com/your-repo/soap-kg",
             "X-Title": "SOAP Knowledge Graph Generator"
         }
+    
+    def _validate_api_key(self) -> None:
+        """Validate API key format and basic security requirements"""
+        if not self.api_key or not Config.ENABLE_API_KEY_VALIDATION:
+            return
+            
+        # Check for minimum length
+        if len(self.api_key) < Config.MIN_API_KEY_LENGTH:
+            logger.warning(f"API key appears to be too short (length: {len(self.api_key)}, minimum: {Config.MIN_API_KEY_LENGTH})")
+            
+        # Check for obvious test/placeholder values
+        if not Config.ALLOW_TEST_API_KEYS:
+            test_patterns = [
+                r'test', r'demo', r'example', r'placeholder', r'your.*key.*here',
+                r'sk-.*test', r'fake', r'dummy', r'sample'
+            ]
+            
+            for pattern in test_patterns:
+                if re.search(pattern, self.api_key.lower()):
+                    logger.warning("API key appears to be a test/placeholder value - this may cause authentication failures")
+                    break
+                    
+        # Log successful validation without exposing the key
+        logger.info(f"API key validated (length: {len(self.api_key)}, masked: {self._mask_api_key(self.api_key)})")
+    
+    def _mask_api_key(self, api_key: str) -> str:
+        """Safely mask API key for logging purposes"""
+        if not api_key:
+            return "None"
+        if len(api_key) <= 8:
+            return "*" * len(api_key)
+        return f"{api_key[:4]}{'*' * (len(api_key) - 8)}{api_key[-4:]}"
+    
+    def _mask_sensitive_data(self, text: str) -> str:
+        """Remove sensitive data from text for safe logging"""
+        if not text or not Config.MASK_SENSITIVE_DATA_IN_LOGS:
+            return text
+            
+        # Mask potential API keys in the text
+        # Pattern for Bearer tokens
+        text = re.sub(r'Bearer\s+[A-Za-z0-9\-_]{20,}', 'Bearer [MASKED]', text)
+        
+        # Pattern for sk-* style keys (OpenAI/OpenRouter format)
+        text = re.sub(r'sk-[A-Za-z0-9\-_]{8,}', 'sk-[MASKED]', text)
+        
+        # Pattern for other potential API keys (long alphanumeric strings)
+        text = re.sub(r'\b[A-Za-z0-9\-_]{32,}\b', '[MASKED_KEY]', text)
+        
+        # Mask Authorization headers
+        text = re.sub(r'"Authorization":\s*"[^"]*"', '"Authorization": "[MASKED]"', text)
+        
+        # Mask any remaining long tokens that might be API keys
+        text = re.sub(r'\b[A-Za-z0-9\-_.]{50,}\b', '[MASKED_LONG_TOKEN]', text)
+        
+        return text
         
     def _make_request(self, messages: List[Dict], max_tokens: int = 1000, 
                      temperature: float = 0.1, max_retries: int = 2) -> Optional[str]:
@@ -57,7 +118,9 @@ class OpenRouterClient:
                     time.sleep(wait_time)
                     continue
                 else:
-                    logger.error(f"OpenRouter API error: {response.status_code} - {response.text}")
+                    # Mask sensitive data in error logs
+                    safe_response_text = self._mask_sensitive_data(response.text)
+                    logger.error(f"OpenRouter API error: {response.status_code} - {safe_response_text}")
                     if attempt < max_retries:
                         continue
                     return None
@@ -68,7 +131,9 @@ class OpenRouterClient:
                     continue
                 return None
             except Exception as e:
-                logger.error(f"Error making OpenRouter request on attempt {attempt + 1}: {e}")
+                # Mask sensitive data in exception logs
+                safe_error_message = self._mask_sensitive_data(str(e))
+                logger.error(f"Error making OpenRouter request on attempt {attempt + 1}: {safe_error_message}")
                 if attempt < max_retries:
                     continue
                 return None
@@ -244,7 +309,8 @@ class OpenRouterClient:
                     pass
         
         # Strategy 5: Return appropriate empty structure
-        logger.warning(f"All JSON parsing strategies failed for text: {text[:100]}...")
+        safe_text = self._mask_sensitive_data(text[:100])
+        logger.warning(f"All JSON parsing strategies failed for text: {safe_text}...")
         if expected_type == "list":
             return []
         elif expected_type == "dict":
@@ -286,12 +352,14 @@ class OpenRouterClient:
                 entities = self._parse_json_with_fallbacks(response, expected_type="list")
                 if entities is None:
                     logger.warning("Failed to parse entity extraction response with all strategies")
-                    logger.debug(f"Raw response: {response[:300]}...")
+                    safe_response = self._mask_sensitive_data(response[:300])
+                    logger.debug(f"Raw response: {safe_response}...")
                     return []
                 return entities if isinstance(entities, list) else []
             except Exception as e:
                 logger.error(f"Unexpected error parsing entity extraction response: {e}")
-                logger.debug(f"Raw response: {response[:300]}...")
+                safe_response = self._mask_sensitive_data(response[:300])
+                logger.debug(f"Raw response: {safe_response}...")
                 return []
         
         return []
@@ -342,7 +410,8 @@ class OpenRouterClient:
                 soap_categories = self._parse_json_with_fallbacks(response, expected_type="dict")
                 if soap_categories is None:
                     logger.warning("Failed to parse SOAP categorization response with all strategies")
-                    logger.debug(f"Raw response: {response[:300]}...")
+                    safe_response = self._mask_sensitive_data(response[:300])
+                    logger.debug(f"Raw response: {safe_response}...")
                     return {"subjective": [], "objective": [], "assessment": [], "plan": []}
                 
                 # Ensure all expected keys exist and validate structure
@@ -380,7 +449,8 @@ class OpenRouterClient:
                     return default_categories
             except Exception as e:
                 logger.error(f"Unexpected error parsing SOAP categorization response: {e}")
-                logger.debug(f"Raw response: {response[:300]}...")
+                safe_response = self._mask_sensitive_data(response[:300])
+                logger.debug(f"Raw response: {safe_response}...")
                 return {"subjective": [], "objective": [], "assessment": [], "plan": []}
         
         return {"subjective": [], "objective": [], "assessment": [], "plan": []}
@@ -430,12 +500,14 @@ class OpenRouterClient:
                 relationships = self._parse_json_with_fallbacks(response, expected_type="list")
                 if relationships is None:
                     logger.warning("Failed to parse relationship extraction response with all strategies")
-                    logger.debug(f"Raw response: {response[:300]}...")
+                    safe_response = self._mask_sensitive_data(response[:300])
+                    logger.debug(f"Raw response: {safe_response}...")
                     return []
                 return relationships if isinstance(relationships, list) else []
             except Exception as e:
                 logger.error(f"Unexpected error parsing relationship extraction response: {e}")
-                logger.debug(f"Raw response: {response[:300]}...")
+                safe_response = self._mask_sensitive_data(response[:300])
+                logger.debug(f"Raw response: {safe_response}...")
                 return []
         
         return []
