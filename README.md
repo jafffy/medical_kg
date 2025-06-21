@@ -10,26 +10,44 @@ This project constructs SOAP (Subjective-Objective-Assessment-Plan) based knowle
 - **Interactive Visualizations**: Generate interactive dashboards and network visualizations
 - **Multiple Export Formats**: Export knowledge graphs in JSON, GraphML, GEXF, and pickle formats
 - **Scalable Processing**: Handles large datasets with configurable batch processing
+- **Rule-Based Fallback**: Works without LLM APIs using built-in medical entity patterns
+- **Professional Package Structure**: Properly organized Python package with CLI interface
 
 ## Project Structure
 
 ```
 constructing_kg/
-├── main.py                     # Main orchestration script
-├── config.py                   # Configuration settings
-├── data_loader.py             # MIMIC-IV data loading utilities
-├── openrouter_client.py       # OpenRouter API client
-├── text_preprocessor.py       # Medical text preprocessing
-├── medical_ner.py             # Named entity recognition
-├── relationship_extractor.py  # Relationship extraction
-├── soap_categorizer.py        # SOAP categorization logic
-├── knowledge_graph_builder.py # Knowledge graph construction
-├── soap_schema.py             # Data models and schemas
-├── visualization.py           # Visualization utilities
-├── requirements.txt           # Python dependencies
-├── environment.yml            # Conda environment file
-├── setup_environment.sh       # Environment setup script
-└── README.md                  # This file
+├── src/soap_kg/                    # Main Python package
+│   ├── __init__.py                 # Package initialization
+│   ├── config.py                   # Configuration settings
+│   ├── cli.py                      # Command-line interface
+│   ├── core/                       # Core processing modules
+│   │   ├── __init__.py
+│   │   ├── data_loader.py          # MIMIC-IV data loading utilities
+│   │   ├── knowledge_graph_builder.py # Knowledge graph construction
+│   │   ├── medical_ner.py          # Named entity recognition
+│   │   ├── relationship_extractor.py # Relationship extraction
+│   │   └── soap_categorizer.py     # SOAP categorization logic
+│   ├── models/                     # Data models and schemas
+│   │   ├── __init__.py
+│   │   └── soap_schema.py          # SOAP data models
+│   └── utils/                      # Utility modules
+│       ├── __init__.py
+│       ├── openrouter_client.py    # OpenRouter API client
+│       ├── text_preprocessor.py    # Medical text preprocessing
+│       └── visualization.py        # Visualization utilities
+├── scripts/                        # Executable scripts
+│   ├── main.py                     # Main orchestration script
+│   └── setup_environment.sh        # Environment setup script
+├── tests/                          # Test directory (for future tests)
+├── docs/                           # Documentation directory
+├── setup.py                        # Package setup script
+├── pyproject.toml                  # Modern Python packaging configuration
+├── MANIFEST.in                     # Package manifest
+├── requirements.txt                # Python dependencies
+├── environment.yml                 # Conda environment file
+├── .gitignore                      # Git ignore rules
+└── README.md                       # This file
 ```
 
 ## Setup
@@ -42,11 +60,24 @@ conda env create -f environment.yml
 conda activate soap-kg
 
 # Or run the setup script
-chmod +x setup_environment.sh
-./setup_environment.sh
+chmod +x scripts/setup_environment.sh
+./scripts/setup_environment.sh
 ```
 
-### 2. Configure OpenRouter API
+### 2. Install Package
+
+```bash
+# For development (editable install)
+pip install -e .
+
+# For regular installation
+pip install .
+
+# Install with all optional dependencies
+pip install -e .[all]
+```
+
+### 3. Configure OpenRouter API
 
 1. Get an API key from [OpenRouter](https://openrouter.ai/)
 2. Set your API key in the `.env` file:
@@ -57,7 +88,7 @@ OPENROUTER_API_KEY=your_api_key_here
 DEFAULT_MODEL=anthropic/claude-3-haiku
 ```
 
-### 3. Prepare MIMIC-IV Dataset
+### 4. Prepare MIMIC-IV Dataset
 
 1. Download MIMIC-IV dataset from [PhysioNet](https://physionet.org/content/mimiciv/)
 2. Place the dataset in `./mimic-iv-3.1/` directory
@@ -80,20 +111,23 @@ DEFAULT_MODEL=anthropic/claude-3-haiku
 
 ```bash
 # Process 10 patients and generate knowledge graph
-python main.py
+python scripts/main.py
+
+# Or use the CLI command (after pip install)
+soap-kg --patients 10
 
 # Process 50 patients with custom output directory
-python main.py --patients 50 --output-dir ./results
+python scripts/main.py --patients 50 --output-dir ./results
 
 # Use rule-based processing only (no LLM)
-python main.py --no-llm --patients 20
+python scripts/main.py --no-llm --patients 20
 ```
 
 ### Advanced Usage
 
 ```bash
 # Custom data path and logging
-python main.py \
+python scripts/main.py \
     --data-path /path/to/mimic-iv \
     --patients 100 \
     --output-dir ./large_analysis \
@@ -101,9 +135,12 @@ python main.py \
     --log-file processing.log
 
 # Load existing knowledge graph for analysis
-python main.py \
+python scripts/main.py \
     --load-existing ./results/soap_knowledge_graph.pkl \
     --output-dir ./reanalysis
+
+# Using the installed CLI
+soap-kg --patients 100 --no-llm --output-dir ./test_output
 ```
 
 ### Command Line Options
@@ -190,14 +227,14 @@ The OpenRouter client includes built-in rate limiting and error handling to ensu
 
 ### Adding New Entity Types
 
-1. Update `EntityType` enum in `soap_schema.py`
-2. Add patterns in `medical_ner.py`
-3. Update SOAP mapping in `soap_categorizer.py`
+1. Update `EntityType` enum in `src/soap_kg/models/soap_schema.py`
+2. Add patterns in `src/soap_kg/core/medical_ner.py`
+3. Update SOAP mapping in `src/soap_kg/core/soap_categorizer.py`
 
 ### Adding New Relationship Types
 
-1. Update `RelationType` enum in `soap_schema.py`
-2. Add patterns in `relationship_extractor.py`
+1. Update `RelationType` enum in `src/soap_kg/models/soap_schema.py`
+2. Add patterns in `src/soap_kg/core/relationship_extractor.py`
 3. Update visualization colors if needed
 
 ### Custom Processing Pipeline
@@ -205,16 +242,40 @@ The OpenRouter client includes built-in rate limiting and error handling to ensu
 Create custom processing pipelines by importing and combining modules:
 
 ```python
-from data_loader import MimicDataLoader
-from medical_ner import MedicalNER
-from knowledge_graph_builder import KnowledgeGraphBuilder
+from soap_kg.core.data_loader import MimicDataLoader
+from soap_kg.core.medical_ner import MedicalNER
+from soap_kg.core.knowledge_graph_builder import KnowledgeGraphBuilder
+from soap_kg.utils.openrouter_client import OpenRouterClient
 
 # Custom processing logic
 loader = MimicDataLoader()
-ner = MedicalNER()
+client = OpenRouterClient()
+ner = MedicalNER(client)
 kg_builder = KnowledgeGraphBuilder()
 
 # Your custom pipeline here
+```
+
+### Development
+
+For development work:
+
+```bash
+# Clone and install in development mode
+git clone <repository-url>
+cd constructing_kg
+conda env create -f environment.yml
+conda activate soap-kg
+pip install -e .[dev]
+
+# Run tests (when available)
+pytest tests/
+
+# Code formatting
+black src/ scripts/
+
+# Type checking
+mypy src/
 ```
 
 ## Troubleshooting
