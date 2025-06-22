@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import Mock, patch
 from soap_kg.core.relationship_extractor import RelationshipExtractor
-from soap_kg.models.soap_schema import MedicalEntity, EntityType, Relationship, RelationshipType
+from soap_kg.models.soap_schema import MedicalEntity, EntityType, MedicalRelation, RelationType, SOAPCategory
 from soap_kg.utils.openrouter_client import OpenRouterClient
 
 
@@ -29,24 +29,24 @@ class TestRelationshipExtractor:
         """Create sample medical entities for testing"""
         return [
             MedicalEntity(
+                id="entity_1",
                 text="hypertension",
                 entity_type=EntityType.DISEASE,
-                start_pos=0,
-                end_pos=12,
+                soap_category=SOAPCategory.ASSESSMENT,
                 confidence=0.9
             ),
             MedicalEntity(
+                id="entity_2",
                 text="aspirin",
                 entity_type=EntityType.MEDICATION,
-                start_pos=20,
-                end_pos=27,
+                soap_category=SOAPCategory.PLAN,
                 confidence=0.85
             ),
             MedicalEntity(
+                id="entity_3",
                 text="blood pressure",
                 entity_type=EntityType.VITAL_SIGN,
-                start_pos=35,
-                end_pos=49,
+                soap_category=SOAPCategory.OBJECTIVE,
                 confidence=0.8
             )
         ]
@@ -55,7 +55,7 @@ class TestRelationshipExtractor:
         """Test initialization with custom OpenRouter client"""
         extractor = RelationshipExtractor(openrouter_client=mock_openrouter_client)
         assert extractor.client == mock_openrouter_client
-        assert hasattr(extractor, 'relationship_patterns')
+        assert hasattr(extractor, 'relation_patterns')
     
     @patch('soap_kg.core.relationship_extractor.OpenRouterClient')
     def test_init_with_default_client(self, mock_openrouter_class):
@@ -69,12 +69,12 @@ class TestRelationshipExtractor:
     
     def test_relationship_patterns_structure(self, extractor_default):
         """Test that relationship patterns are properly structured"""
-        patterns = extractor_default.relationship_patterns
+        patterns = extractor_default.relation_patterns
         
         # Check expected relationship types are present
         expected_types = [
-            RelationshipType.TREATS, RelationshipType.CAUSES,
-            RelationshipType.DIAGNOSED_WITH, RelationshipType.INDICATES
+            RelationType.TREATS, RelationType.CAUSES,
+            RelationType.DIAGNOSED_WITH, RelationType.INDICATES
         ]
         
         for rel_type in expected_types:
@@ -125,7 +125,7 @@ class TestRelationshipExtractor:
             result = extractor_default.extract_relationships_rule_based(sample_entities, text)
             
             assert len(result) > 0
-            relationship = next((r for r in result if r.relationship_type == RelationshipType.TREATS), None)
+            relationship = next((r for r in result if r.relation_type == RelationType.TREATS), None)
             assert relationship is not None
             assert relationship.source_entity == sample_entities[1]  # aspirin
             assert relationship.target_entity == sample_entities[0]  # hypertension
@@ -172,11 +172,13 @@ class TestRelationshipExtractor:
         
         with patch.object(extractor_with_mock_client, 'extract_relationships_rule_based') as mock_rule:
             rule_relationships = [
-                Relationship(
-                    source_entity=sample_entities[1],
-                    target_entity=sample_entities[0],
-                    relationship_type=RelationshipType.TREATS,
-                    confidence=0.7
+                MedicalRelation(
+                    id="rel_1",
+                    source_entity=sample_entities[1].id,
+                    target_entity=sample_entities[0].id,
+                    relation_type=RelationType.TREATS,
+                    confidence=0.7,
+                    soap_context=SOAPCategory.PLAN
                 )
             ]
             mock_rule.return_value = rule_relationships
@@ -197,11 +199,13 @@ class TestRelationshipExtractor:
         
         with patch.object(extractor_with_mock_client, 'extract_relationships_rule_based') as mock_rule:
             rule_relationships = [
-                Relationship(
-                    source_entity=sample_entities[1],
-                    target_entity=sample_entities[0],
-                    relationship_type=RelationshipType.TREATS,
-                    confidence=0.8
+                MedicalRelation(
+                    id="rel_2",
+                    source_entity=sample_entities[1].id,
+                    target_entity=sample_entities[0].id,
+                    relation_type=RelationType.TREATS,
+                    confidence=0.8,
+                    soap_context=SOAPCategory.PLAN
                 )
             ]
             mock_rule.return_value = rule_relationships
@@ -232,17 +236,17 @@ class TestRelationshipExtractor:
         # Create entities that are far apart
         entities = [
             MedicalEntity(
+                id="entity_1",
                 text="hypertension",
                 entity_type=EntityType.DISEASE,
-                start_pos=0,
-                end_pos=12,
+                soap_category=SOAPCategory.ASSESSMENT,
                 confidence=0.9
             ),
             MedicalEntity(
+                id="entity_2",
                 text="aspirin",
                 entity_type=EntityType.MEDICATION,
-                start_pos=200,  # Far away
-                end_pos=207,
+                soap_category=SOAPCategory.PLAN,
                 confidence=0.85
             )
         ]
@@ -257,21 +261,25 @@ class TestRelationshipExtractor:
     def test_validate_relationship_logical(self, extractor_default, sample_entities):
         """Test logical relationship validation"""
         # Valid relationship: medication treats disease
-        valid_rel = Relationship(
-            source_entity=sample_entities[1],  # aspirin
-            target_entity=sample_entities[0],  # hypertension
-            relationship_type=RelationshipType.TREATS,
-            confidence=0.9
+        valid_rel = MedicalRelation(
+            id="rel_3",
+            source_entity=sample_entities[1].id,  # aspirin
+            target_entity=sample_entities[0].id,  # hypertension
+            relation_type=RelationType.TREATS,
+            confidence=0.9,
+            soap_context=SOAPCategory.PLAN
         )
         
         assert extractor_default._validate_relationship(valid_rel) is True
         
         # Invalid relationship: disease treats medication
-        invalid_rel = Relationship(
-            source_entity=sample_entities[0],  # hypertension
-            target_entity=sample_entities[1],  # aspirin
-            relationship_type=RelationshipType.TREATS,
-            confidence=0.9
+        invalid_rel = MedicalRelation(
+            id="rel_4",
+            source_entity=sample_entities[0].id,  # hypertension
+            target_entity=sample_entities[1].id,  # aspirin
+            relation_type=RelationType.TREATS,
+            confidence=0.9,
+            soap_context=SOAPCategory.ASSESSMENT
         )
         
         # This should be invalid or have lower confidence
@@ -280,11 +288,13 @@ class TestRelationshipExtractor:
     
     def test_get_relationship_confidence(self, extractor_default, sample_entities):
         """Test relationship confidence calculation"""
-        relationship = Relationship(
-            source_entity=sample_entities[1],  # aspirin
-            target_entity=sample_entities[0],  # hypertension
-            relationship_type=RelationshipType.TREATS,
-            confidence=0.8
+        relationship = MedicalRelation(
+            id="rel_5",
+            source_entity=sample_entities[1].id,  # aspirin
+            target_entity=sample_entities[0].id,  # hypertension
+            relation_type=RelationType.TREATS,
+            confidence=0.8,
+            soap_context=SOAPCategory.PLAN
         )
         
         text = "Patient takes aspirin to treat hypertension"
@@ -298,18 +308,22 @@ class TestRelationshipExtractor:
     def test_deduplicate_relationships(self, extractor_default, sample_entities):
         """Test relationship deduplication"""
         # Create duplicate relationships
-        rel1 = Relationship(
-            source_entity=sample_entities[1],
-            target_entity=sample_entities[0],
-            relationship_type=RelationshipType.TREATS,
-            confidence=0.8
+        rel1 = MedicalRelation(
+            id="rel_6",
+            source_entity=sample_entities[1].id,
+            target_entity=sample_entities[0].id,
+            relation_type=RelationType.TREATS,
+            confidence=0.8,
+            soap_context=SOAPCategory.PLAN
         )
         
-        rel2 = Relationship(
-            source_entity=sample_entities[1],
-            target_entity=sample_entities[0],
-            relationship_type=RelationshipType.TREATS,
-            confidence=0.9  # Higher confidence
+        rel2 = MedicalRelation(
+            id="rel_7",
+            source_entity=sample_entities[1].id,
+            target_entity=sample_entities[0].id,
+            relation_type=RelationType.TREATS,
+            confidence=0.9,  # Higher confidence
+            soap_context=SOAPCategory.PLAN
         )
         
         relationships = [rel1, rel2]
@@ -343,4 +357,4 @@ class TestRelationshipExtractor:
         assert isinstance(result['relationship_types'], dict)
         
         if len(result['relationships']) > 0:
-            assert all(isinstance(rel, Relationship) for rel in result['relationships'])
+            assert all(isinstance(rel, MedicalRelation) for rel in result['relationships'])
