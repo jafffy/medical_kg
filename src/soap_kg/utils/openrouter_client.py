@@ -25,7 +25,7 @@ class OpenRouterClient:
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com/your-repo/soap-kg",
+            "HTTP-Referer": "https://github.com/jafffy/medical_kg",
             "X-Title": "SOAP Knowledge Graph Generator"
         }
     
